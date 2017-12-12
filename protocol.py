@@ -5,6 +5,11 @@ import os
 import socket
 import random
 import Queue
+
+from sys import argv, stderr
+
+import lz4framed
+
 IP = '127.0.0.1'
 dataToSend="Hello World"
 dataToSendSize=11
@@ -13,7 +18,7 @@ sendDataPort = None
 receiveAckPort = None
 receiveAckSocket = None
 SendDataSock =None
-TIMEOUT=5
+TIMEOUT=0.5
 MAX_PACKETS=8
 dataPackets = [None for i in range(MAX_PACKETS)]
 nextDataToCompress=0
@@ -41,6 +46,11 @@ class SendDataThread(threading.Thread):
 		global nextPacketToSend
 		global packetSentAndAck
 		global TIMEOUT
+
+		global sendDataPort
+		global receiveAckPort 
+		global receiveAckSocket
+		global SendDataSock
 		while(True):
 			c.acquire()
 			# print 'C Acquired by SendDataThread'
@@ -253,29 +263,36 @@ def getBlock(sequence,compressed,data):
 	if compressed:
 		sequence+=1
 	b=bytes(bytearray([(sequence<<4)+hashvalue]))
-	print b
+	# print b
 	return b[0]+bytes(data)
 def getHash(data):
 	return 0
 
 def compressLZ4(data):
-	# time.sleep((random.random()*5000)+2000)
 	if data==None:
 		return None
+	data=lz4framed.compress(data)
+	# time.sleep((random.random()*5000)+2000)
 	return data
 
 def send(data):
 	# print "sending"
 	global IP
 	global sendDataPort
+	global receiveAckPort 
+	global receiveAckSocket
 	global SendDataSock
 	SendDataSock.sendto(data,(IP,sendDataPort))
 def recvAck():
 	global sendingLastBlock
+	global sendDataPort
+	global receiveAckPort 
+	global receiveAckSocket
+	global SendDataSock
 	while True:
 		data, addr=receiveAckSocket.recvfrom(16)
 		s=int(data[0].encode('hex'), 16)
-		print "Ack : ",s
+		# print "Ack : ",s
 		ackQueue.put(s)
 		if s==sendingLastBlock:
 			print 'Last Block'

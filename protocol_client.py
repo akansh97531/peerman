@@ -5,6 +5,13 @@ import os
 import socket
 import Queue
 import random
+
+
+
+from sys import  stderr
+
+import lz4framed
+
 IP = None
 receiveDataPort = None
 sendAckPort = None
@@ -12,7 +19,8 @@ receiveDataSocket = None
 sendAckSocket = None
 dataReceived= Queue.Queue()
 dataAligned = Queue.Queue()
-TIMEOUT=5
+totalDataReceived=0
+TIMEOUT=0.5
 MAX_PACKETS=8
 dataPackets = [None for i in range(MAX_PACKETS)]
 isCompressed = [None for i in range(MAX_PACKETS)]
@@ -23,6 +31,7 @@ transferComplete = threading.Condition()
 file=None
 received_bytes=0
 chunk_size=1024
+header_size=30
 class ReceiveDataThread(threading.Thread):
     def __init__(self,name):
         threading.Thread.__init__(self)
@@ -33,15 +42,17 @@ class ReceiveDataThread(threading.Thread):
         global dataPackets
         global nextPacketToSend
         global packetSentAndAck
+        global totalDataReceived
         global TIMEOUT
         while(True):
-            data, addr=receiveDataSocket.recvfrom(chunk_size+1)
+            data, addr=receiveDataSocket.recvfrom(chunk_size+header_size)
+            totalDataReceived+=len(data)
             dataReceived.put(data)
-            # print 'Recv : ',data
+            #print 'Recv : ',data
             s=int(data[0].encode('hex'), 16)
             hashv=s%16
-            if hashv==15:
-                break
+            # if hashv==15:
+            #     break
             
 
 class processDataThread(threading.Thread):
@@ -125,6 +136,13 @@ class saveDataThread(threading.Thread):
 
 
 def decompress(data):
+    if len(data)>0:
+    	try:
+            data=lz4framed.decompress(data)
+        except:
+            print  'error : ',data   
+    else:
+        data=None
     return data
 def verify(hashv,data):
     if hashv==15:
@@ -141,7 +159,7 @@ def saveToFile(data):
     else:
         file.write(data)
         received_bytes+=len(data)
-    print data
+    #print data
 
 
 def recv_data(f,chunk):

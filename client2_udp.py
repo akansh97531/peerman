@@ -37,7 +37,7 @@ chunk_size=10240
 file_name=""
 data_port = 45678
 ack_port = 45677
-
+timeout_socket= 5
 
 
 def recv():
@@ -49,27 +49,6 @@ def recv():
     protocol_client.sendAckPort = ack_port
     protocol_client.receiveDataSocket = sockfd
     protocol_client.sendAckSocket = sockfd_ack
-    upnp = miniupnpc.UPnP()
-    #upnp.discoverdelay = 10
-
-    total_chunks=file_size/chunk_size
-
-    if upnp.discover()>0:
-        upnp.selectigd()
-        try:
-            upnp.deleteportmapping(data_port,"UDP")
-        except :
-            print("port not in used")
-        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
-        upnp.addportmapping(data_port, 'UDP', upnp.lanaddr, data_port, 'peerman', '')
-
-        try:
-            upnp.deleteportmapping(ack_port,"UDP")
-        except :
-            print("port not in used")
-        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
-        upnp.addportmapping(ack_port, 'UDP', upnp.lanaddr, ack_port, 'peerman', '')
-        
 
     # Establish connection with client.
     #print 'Got connection from', addr
@@ -100,9 +79,8 @@ def recv():
     #     f.write(l)
         #print "received :  ",l
 
-    i_max+=chunk_size
     f.close()
-    print "Done Receiving"
+    print "Done Receiving , ",protocol_client.totalDataReceived
     sockfd.sendto('Thank you for connecting',target)
     sockfd.close() 
 
@@ -124,8 +102,8 @@ def send():
     print file_temp[-1]
 
     ## send file header
-    sockfd.sendto("#"+str(file_size)+"#"+file_temp[-1],target)
-    time.sleep(.5)
+    sockfd.sendto("#"+str(file_size)+"#"+file_temp[-1],(target[0],data_port) )
+    time.sleep(2)
     print 'Sending...'
 
     protocol.send_data(f,chunk_size)
@@ -232,10 +210,39 @@ def bytes2addr( bytes ):
     port, = struct.unpack( "H", bytes[-2:] )
     return host, port
 
+def upnp_open(data_port_local,ack_port_local):
+
+    upnp = miniupnpc.UPnP()
+    #upnp.discoverdelay = 10
+
+    if upnp.discover()>0:
+        upnp.selectigd()
+        try:
+            upnp.deleteportmapping(data_port_local,"UDP")
+        except :
+            print("port not in used")
+        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
+        upnp.addportmapping(data_port_local, 'UDP', upnp.lanaddr, data_port_local, 'peerman', '')
+
+        try:
+            upnp.deleteportmapping(ack_port_local,"UDP")
+        except :
+            print("port not in used")
+        # addportmapping(external-port, protocol, internal-host, internal-port, description, remote-host)
+        upnp.addportmapping(ack_port_local, 'UDP', upnp.lanaddr, ack_port_local, 'peerman', '')
+
+
+
+        
+
+
+
 def connect(server_add,server_port,server_pool):
     global target
     global sockfd
     global sockfd_ack
+    global data_port
+    global ack_port
 
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
@@ -252,18 +259,84 @@ def connect(server_add,server_port,server_pool):
     sockfd.bind(("",data_port))
     sockfd_ack.bind(("",ack_port))
 
-    sockfd.sendto( pool +"#"+str(s.getsockname()[0])+"#"+str(sockfd.getsockname()[1]) , master )
-    print (master,sockfd.getsockname())
+    ## sending local ip and  through data_port with pool
+    pool_localip_dataport_ack_port= pool +"#"+str(s.getsockname()[0])+"#"+str(sockfd.getsockname()[1])
+    sockfd.sendto(pool_localip_dataport_ack_port, master )
 
     data, addr = sockfd.recvfrom( len(pool)+50 )
     if data != "ok "+pool:
         print >>sys.stderr, "unable to request!"
         sys.exit(1)
-    sockfd.sendto( "ok", master )
+
+    ## sending through ack_port -> ok  message
+    sockfd_ack.sendto( "ok", master )
+
+
     print >>sys.stderr, "request sent, waiting for parkner in pool '%s'..." % pool
     data, addr = sockfd.recvfrom( 100 )
     temp = data.split("#")
-    target = (temp[0],int(data_port) )
+    ## temp contains target's ip data_port ack_port
+    target = (temp[0],temp[1] )
+    ## target peer address received
+    print temp,":::"
+    temp[1]=int(temp[1])
+    temp[2]=int(temp[2])
+
+
+
+    is_connected = 0
+    while is_connected==0:
+        data, addr = sockfd.recvfrom( 100 )
+        print data
+        if data == "connect" :
+            sockfd.sendto( "ok_data_port", (temp[0],temp[1]) )
+            sockfd_ack.sendto( "ok_ack_port", (temp[0],temp[2]) )
+            sockfd.settimeout(timeout_socket)
+            sockfd_ack.settimeout(timeout_socket)
+            try:
+                data_from_dataport,addr_dataport = sockfd.recvfrom(50)
+                data_from_ackport,addr_ackport = sockfd_ack.recvfrom(50)
+                if data_from_dataport=="to_peer":
+                    global data_port
+                    global ack_port
+                    data_port = temp[1]
+                    ack_port = temp[2]  
+                    print data_from_dataport,data_from_ackport
+                    is_connected=1
+            except:
+                is_connected=0
+            sockfd.settimeout(None)
+            sockfd_ack.settimeout(None)
+
+        elif data == "receive":
+            global data_port
+            global ack_port
+            upnp_open(data_port,ack_port)
+            sockfd.settimeout(timeout_socket)
+            sockfd_ack.settimeout(timeout_socket)
+            try :
+                data_from_dataport,addr_dataport = sockfd.recvfrom(50)
+                data_from_ackport,addr_ackport = sockfd_ack.recvfrom(50)
+                print data_from_dataport,data_from_ackport
+                sockfd.sendto("yes",master)
+                sockfd.sendto("to_peer",addr_dataport)
+                sockfd_ack.sendto("to_peer_ack",addr_ackport)
+                global data_port
+                global ack_port
+                data_port = addr_dataport[1]
+                ack_port = addr_ackport[1]
+                is_connected=1
+            except :
+                data_from_dataport , data_from_ackport = None, None
+                addr_dataport , addr_ackport = None, None
+                sockfd.sendto("no",master)
+            sockfd.settimeout(None)
+            sockfd_ack.settimeout(None)
+
+        elif data== "turn":
+            break
+
+    #target[1] = data_port
     print >>sys.stderr, "connected to ", target
 
     s.close()
@@ -348,7 +421,7 @@ def main():
 
 if __name__ == "__main__":
 
-    # main()
+    #main()
 
     root = Tk()
     root.wm_title("peerman")
@@ -362,4 +435,4 @@ if __name__ == "__main__":
 # python client2.py 13.126.90.141 4653 "abc" "r" ('13.126.90.141', 4653)
 # sudo ssh -i vaibhav.pem ubuntu@ec2-35-154-215-193.ap-south-1.compute.amazonaws.com
 # sudo ssh -i "akansh97531.pem" ubuntu@ec2-13-126-90-141.ap-south-1.compute.amazonaws.com
-# requirements miniupnpc python-tk
+# requirements miniupnpc python-tk py-lz4framed
