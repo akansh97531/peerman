@@ -253,7 +253,7 @@ def getBlock(sequence,compressed,data):
 	if compressed:
 		sequence+=1
 	b=bytes(bytearray([(sequence<<4)+hashvalue]))
-	# print b
+	print b
 	return b[0]+bytes(data)
 def getHash(data):
 	return 0
@@ -275,7 +275,7 @@ def recvAck():
 	while True:
 		data, addr=receiveAckSocket.recvfrom(16)
 		s=int(data[0].encode('hex'), 16)
-		# print "Ack : ",s
+		print "Ack : ",s
 		ackQueue.put(s)
 		if s==sendingLastBlock:
 			print 'Last Block'

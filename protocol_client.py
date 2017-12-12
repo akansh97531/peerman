@@ -141,7 +141,7 @@ def saveToFile(data):
     else:
         file.write(data)
         received_bytes+=len(data)
-    #print data
+    print data
 
 
 def recv_data(f,chunk):
